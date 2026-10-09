@@ -77,6 +77,26 @@ This round also produced the fixture suite: `test/fixtures/` plus
 fixtures, compares a source snapshot before and after to prove the commands are
 read-only, and reports a missing toolchain as SKIP rather than success.
 
+## Round 3 — Java and Go completeness
+
+Both ecosystems were taken past "the command runs" to "the command is asserted in CI".
+
+| Target | What was run | Result |
+| --- | --- | --- |
+| Spring Boot gateway (Java 21, built in a Temurin 21 container) | `mvn -pl mate-gateway -am -DskipTests package`, then jar inspection | Produced an **87 MB fat jar with 174 `BOOT-INF/lib` entries**; real heavyweights: `nacos-client` 14.9 MB, `byte-buddy` 9.0 MB, `bcprov-jdk18on` 8.9 MB, `redisson` 2.9 MB |
+| The same jar | `unzip -l … \| sort -k1 -rn \| head` vs `awk 'NF==4'` | The unfiltered ranking put `unzip`'s **own summary line** (`91928424  356 files`) first; the filtered form is now the documented command |
+| The same jar | `java -Djarmode=layertools … list`, `java -Djarmode=tools … list-layers` | Both list the four layers, but `layertools` prints a **deprecation warning**; the docs now lead with `-Djarmode=tools` |
+| The same jar, started for 12 s | `java -Xlog:class+load:file=… -jar app.jar` | **14,120 classes** loaded, **1,458** of them from the CDS archive — the real order of magnitude next to the 411-class Hello World |
+| Maven single-module library | `mvn org.basepom.maven:duplicate-finder-maven-plugin:check` | Runs across compile/runtime/test classpaths; no duplicate classes in that project |
+| The same library | `mvn dependency:tree -Dverbose`, `-Dincludes=io.r2dbc`, `jdeps --print-module-deps` | `-Dverbose` still emits `omitted for duplicate` on plugin 3.9.0; `-Dincludes` scopes correctly; jdeps reported `java.base,java.desktop` |
+| Gradle (cached 8.9 distribution) | `dependencies --configuration runtimeClasspath`, `dependencyInsight` | Both succeed offline; the fixtures now assert them in CI |
+| Go service | `go mod why -m` on a used and an unused module | Import chain `internal/handler → github.com/google/uuid`; `(main module does not need module …)` for the unused one |
+| Go service | `go build` with a broken git environment, then `GOFLAGS=-buildvcs=false` | **Reproduced**: the default build fails with `error obtaining VCS status: exit status 128`; with the flag it succeeds and `go version -m <bin>` reports zero `vcs.*` lines |
+| New `go-unused` fixture | `go mod tidy -diff` | Exits **1** and prints the real diff removing `require example.com/leftover v0.0.0`; the clean fixture exits 0 silently — so the exit code is a usable CI gate |
+
+The CI run on a clean Ubuntu runner now executes **21 checks with 0 skips**, covering
+Node, Go (including positive detection), Gradle, Rust, Python, PHP and Maven.
+
 ## What was still not validated
 
 - `knip`, `cargo udeps`, `cargo bloat`, `pip-check-reqs` and `composer-unused`
@@ -84,10 +104,13 @@ read-only, and reports a missing toolchain as SKIP rather than success.
   their own tool docs.
 - `source-map-explorer` / `webpack-bundle-analyzer` were not executed end to end,
   because no inspected project shipped sourcemaps.
-- **CDS savings on a real application** were not measured; only the 411-class
-  Hello World was. The documentation therefore avoids quoting a percentage.
-- Java analysis ran on a single module inside a container, not across the whole
-  41-module reactor.
+- **CDS savings on a real application** were still not measured: the real app's
+  class-loading volume was (14,120 classes), but its before/after startup saving
+  was not, so the documentation avoids quoting a percentage.
+- Java analysis ran on single modules and one container build, not across the
+  whole 41-module reactor.
+- The fat-jar checks (`jarmode`, class-load logging, duplicate-finder) were run by
+  hand against a real project; CI covers the Maven and Gradle fixtures instead.
 
 ## Reproducing everything
 

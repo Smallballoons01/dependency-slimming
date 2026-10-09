@@ -108,6 +108,8 @@ npm run verify         # documented commands vs fixtures, with a read-only proof
 npm run verify:network # adds the Maven case
 ```
 
+CI runs the same suite on every push, on a clean Ubuntu runner that exercises all six ecosystems — currently 21 checks with 0 skips.
+
 ## Contributing
 
 Issues and pull requests are welcome. Two rules for doc changes: every command must have been run at least once, and `node --test` must stay green — the tests assert the validated facts above.

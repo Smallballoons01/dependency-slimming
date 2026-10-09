@@ -108,6 +108,8 @@ npm run verify         # 用 fixture 实跑文档命令，并校验只读
 npm run verify:network # 追加 Maven 用例
 ```
 
+CI 每次推送都会在同一套检查上跑一遍，干净的 Ubuntu runner 覆盖全部六个生态——目前 21 项、0 跳过。
+
 ## 贡献
 
 欢迎 issue 与 PR。文档改动两条规矩：每条命令必须至少真跑过一次；`node --test` 必须保持通过（测试里就断言着上面这些已验证事实）。
