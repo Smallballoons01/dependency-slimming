@@ -38,6 +38,19 @@ Serverless/冷启动专项见 references/startup-optimization.md。
    实测一个 87M 的 Boot 网关肥 jar：174 个依赖条目，真实大户 `nacos-client` 14.9M、`byte-buddy` 9.0M、`bcprov-jdk18on` 8.9M、`redisson` 2.9M。
 3. 依赖树：`mvn dependency:tree -Dverbose`（**插件 3.9.0 仍支持**，实测打印 `... omitted for duplicate` 行，正是版本收敛现场）；范围下钻 `mvn dependency:tree -Dincludes=组:构件`（实测 `-Dincludes=io.r2dbc` 只列出该组）；Gradle：`./gradlew dependencies --configuration runtimeClasspath`（实测输出 `runtimeClasspath - Runtime classpath of source set 'main'`）；冲突下钻 `./gradlew dependencyInsight --dependency <名> --configuration runtimeClasspath`（实测无匹配时打印 `No dependencies matching given input were found`，仍 BUILD SUCCESSFUL）。
 4. 运行时镜像裁剪：`jdeps --print-module-deps --ignore-missing-deps target/app.jar`（实测某库输出 `java.base,java.desktop`——注意 `java.desktop` 常被无意拖进来，是 jlink 最小化的首要削减对象）。
+5. **不下载任何东西，按真实体积给依赖排序**（把树里的坐标映射到本地仓库 jar 体积）。实测一个 232MB 胖 jar 的工程，一条流水线就排出 `rocketmq-rocksdb` 28.6MB、`volc-sdk-java` 20.8MB、`grpc-xds` 11.9MB、`grpc-netty-shaded` 9.3MB：
+   ```bash
+   grep -oE '[a-zA-Z0-9_.-]+:[a-zA-Z0-9_.-]+:jar:[^:]+' /tmp/tree.txt | sort -u > /tmp/deps.txt
+   while IFS=: read -r g a _ v; do
+     p="$HOME/.m2/repository/$(echo "$g" | tr '.' '/')/$a/$v/$a-$v.jar"
+     [ -f "$p" ] && printf '%10s  %s:%s:%s\n' "$(stat -f%z "$p" 2>/dev/null || stat -c%s "$p")" "$g" "$a" "$v"
+   done < /tmp/deps.txt | sort -rn | head -20
+   ```
+6. ⚠️ **树里的跨模块版本分裂 ≠ 产物里真有两份**：实测某工程不同模块分别解析出 grpc 1.53.0/1.59.1、okhttp 3.14.9/4.10.0，但肥 jar 的 `BOOT-INF/lib` 里每种只有一个版本（Maven 仲裁只保留一个）。跨模块版本不一致是**维护一致性**问题；体积结论必须回到产物里确认，别拿树下结论。
+7. **产物内同名依赖多版本检测**（去掉版本号后重名）：
+   `unzip -l app.jar | grep -oE 'BOOT-INF/lib/[^ ]+\.jar' | sed 's|BOOT-INF/lib/||;s|\.jar$||' | sed -E 's/-[0-9][0-9A-Za-z._-]*$//' | sort | uniq -c | awk '$1>1'`
+   注意它会把 **classifier 变体**（`…-linux-x86_64` 与 `…-linux-aarch_64`）也算成"重复"——那是同名不同分类器，不是版本冲突；实测这类合计只有 0.2MB，别当体积问题报。
+8. **打进 `BOOT-INF/classes` 的静态数据要单独看**：实测某工程的 232MB 胖 jar 里有 17.7MB 是地理库数据文件（`GeoLite2-Country.mmdb` 8.9MB + `IP2LOCATION-LITE-DB1.IPV6.BIN` 8.8MB），而后者对应的依赖在 pom 里**已被注释掉**、全工程 0 处引用——是死数据。外部挂载这类库还能顺带解决"更新数据要重新发版"的问题。
 
 未使用（Maven 自带）：
 - `mvn dependency:analyze` 会 **fork `test-compile` 生命周期**（输出里可见 `>>> dependency:analyze > test-compile >>>`），所以它**自己会先编译**，不需要手动加 compile 前置。代价是它继承了整个构建：**项目在你本机 JDK 上编译不过，它就什么也分析不出来**（实测某项目 target 21、本机 JDK 17 → `不支持发行版本 21`，analyze 零输出）。先确认 `java -version` 与项目 target 匹配。
@@ -53,6 +66,7 @@ Serverless/冷启动专项见 references/startup-optimization.md。
   实测：同一 Java 21 项目在本机 JDK 17 报 `不支持发行版本 21`、在 JDK 26 报编译器插件 `TypeTag :: UNKNOWN`，而这条容器命令编译并通过分析。⚠️ 用 `--user $(id -u):$(id -g)` 才不会在宿主机 `~/.m2` 里留下 root 属主文件。
 - ⚠️ **"未使用"≠可删**：实测某 R2DBC 扩展库的 analyze 把 `spring-boot-starter-webflux`、`spring-boot-starter-data-r2dbc` 判成 unused——而它们是 SPI 自动配置入口（写在 `AutoConfiguration.imports` 里），源码中根本没有对应 import。这就是下面误报源的真实样本：**先判断是不是 SPI / 反射 / 注解处理器，再决定删**。
 - **必知误报源**：lombok/mapstruct 等注解处理器；JDBC 驱动、Jackson modules、日志实现等 SPI；Spring/Hibernate 反射加载的类——这些会被判"未使用"。保留，必要时改 scope（如 runtime）而不是删。
+- **配置/字符串引用复核清单**（源码 grep 为 0 也必须保留的情况）：`spring.datasource.type: com.alibaba.druid.pool.DruidDataSource`（实测某工程 druid 源码零引用但配置里写死了类名）、logback 的 appender 与 `<if>` 条件（janino、lts-sdk 这类只在 xml 里出现）、`@Cached`/jetcache 注解、`spring.factories` / `AutoConfiguration.imports`、`@Conditional`。**先过一遍这份清单，再决定是否把某条"未使用"写成删除建议。**
 - 多模块 `-DoutputFile` 会被每个模块**互相覆盖**：必须加 `-DappendOutput=true`（实测 41 条 reactor 从 25 行恢复到 4151 行）。
 - ⚠️ **截断陷阱**：几十个模块的 reactor 输出几百行，`grep ... | head` 会在结论出现前截断——实测某处重复声明在第 35/41 个模块才出现，`head -15` 完全看不到。先 `> /tmp/log` 落盘，再定位模块，或用 `-pl` 收窄。
 - Gradle 无内置分析：推荐 `com.autonomousapps.dependency-analysis` 插件。

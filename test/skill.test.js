@@ -117,6 +117,10 @@ test('the Java guidance keeps the reactor and analyzer corrections', () => {
   assert.match(text, /dependency:tree -Dverbose/, 'verbose trees still work on plugin 3.9.0 and stay documented')
   assert.match(text, /duplicate-finder/, 'same-class-in-two-jars detection is the high-value check')
   assert.match(text, /jdeps/, 'runtime image trimming via jdeps must stay documented')
+  assert.match(text, /\.m2\/repository/, 'local-repo size attribution ranks dependencies without downloading')
+  assert.match(text, /仲裁/, 'a version split in the tree does not mean two jars in the artifact')
+  assert.match(text, /BOOT-INF\/classes/, 'static data baked into classes is its own bloat category')
+  assert.match(text, /spring\.datasource\.type/, 'config-referenced dependencies must be re-checked before removal')
 })
 
 test('the startup guidance keeps the current Spring Boot layering tooling', () => {
