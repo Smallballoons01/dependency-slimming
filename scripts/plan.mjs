@@ -36,12 +36,14 @@ const ECOSYSTEMS = [
     lockfiles: ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lockb'],
     notes: [
       'node_modules size is an install-size signal, not artifact size; measure the built bundle separately.',
-      'pnpm node_modules is a symlink farm — per-directory du is misleading, use node_modules/.pnpm or the lockfile.',
-      'depcheck/knip can flag packages referenced only from tool config (eslint, postcss, jest) — confirm before removing.',
+      'On pnpm workspaces `du -sh node_modules/*` reports 0B for symlinked packages (measured: vitest, typescript, esbuild, playwright), so the ranking is pure noise — read node_modules/.pnpm instead.',
+      'depcheck/knip over-report: a measured run flagged tailwindcss, @tailwindcss/typography and two @storybook addons as unused, all referenced only from CSS and .storybook config.',
+      'source-map-explorer needs .map files; a measured Vite build shipped none, so check for them before relying on it.',
     ],
     readOnly: [
       { cmd: 'du -sh node_modules 2>/dev/null | cut -f1', why: 'Install-size baseline' },
       { cmd: 'du -sh node_modules/* 2>/dev/null | sort -rh | head -25', why: 'Largest installed packages' },
+      { cmd: 'du -sh node_modules/.pnpm/* 2>/dev/null | sort -rh | head -25', why: 'Largest packages on pnpm (symlinks make the line above report 0B)' },
       { cmd: 'npx depcheck', why: 'Unused dependencies (fast pass)', network: true },
       { cmd: 'npx knip', why: 'Unused deps/files/exports (deep pass)', network: true },
       { cmd: 'npm ls <pkg>', why: 'Duplicate versions of one package' },
@@ -132,7 +134,9 @@ const ECOSYSTEMS = [
     lockfiles: ['Cargo.lock'],
     notes: [
       'cargo machete is a fast heuristic; cargo udeps is accurate but needs nightly.',
+      'cargo machete also scans vendored/path crates (measured: its only finding sat in a vendor/ fork, not in the project itself).',
       'Duplicate major versions are normal and mostly not removable; check who pins them first.',
+      'A missing [profile.release] section is common; on a measured 17 MB binary, strip alone removed 19.3%.',
     ],
     readOnly: [
       { cmd: 'cargo tree -d', why: 'Duplicate crate versions' },
@@ -153,6 +157,8 @@ const ECOSYSTEMS = [
     notes: [
       'Framework loading by string (Django INSTALLED_APPS, Celery tasks, Alembic, entry points) looks unused to static tools.',
       'Split dev/test/docs extras so production installs stop dragging jupyter/pytest along.',
+      'deptry reports dependencies from [project.optional-dependencies] as unused unless the extras are configured (measured: pytest, hypothesis, pytest-mock).',
+      'When the import name differs from the package name, deptry emits a paired false finding (measured: DEP001 dotenv + DEP002 python-dotenv) — fix it with package_module_name_map.',
     ],
     readOnly: [
       { cmd: 'du -sh "$(python -c \'import site; print(site.getsitepackages()[0])\')"/* 2>/dev/null | sort -rh | head -20', why: 'Largest installed packages' },

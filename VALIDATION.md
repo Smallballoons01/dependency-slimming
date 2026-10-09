@@ -52,17 +52,50 @@ writes nothing.
 
 Stated plainly so the docs are not read as more tested than they are:
 
-- **Node, Rust, Python and PHP command sets** were not exercised against a real
-  project in this round. They come from the tools' own documentation. Treat the
-  first run in your repository as the validation.
+## Round 2 — the remaining ecosystems
+
+Environment added for this round: cargo 1.98.1, uv 0.11.14, Docker 29.4.3, OpenJDK 26.
+
+| Target | Shape | What was run | Result |
+| --- | --- | --- | --- |
+| pnpm workspace (frontend) | 1.4 GB `node_modules`, pnpm 11 | `du -sh node_modules/*`, `du -sh node_modules/.pnpm/*`, `pnpm why react` | `du` reported **0 B** for vitest / typescript / esbuild / @playwright (symlinks), so the ranking was noise; `.pnpm` showed the real weights (242 MB, 210 MB, 145 MB) |
+| Vite app in that workspace | `dist/` with no `.map` files | `ls dist/assets/*.map`, source-map-explorer feasibility | Build shipped **0 sourcemaps**, so the documented command cannot run; largest chunk 5.6 MB |
+| npm project | 4 dev dependencies, lockfile present | `npx depcheck`, `npm ls --all \| grep -c deduped` | depcheck returned 5 findings, **4 of them provably false** (tailwind, two storybook addons); 52 `deduped` entries |
+| Rust TUI | 35 direct dependencies, existing release binary | `cargo tree -d`, `cargo tree -i`, `cargo machete` (installed to /tmp), `strip` | `bitflags` 1.3.2 vs 2.11.0 duplicate; machete's only finding sat in `vendor/`; strip alone removed **19.3%** of a 17.0 MB binary |
+| Python project | Python 3.13 venv, pyproject with a dev extra | `deptry` via `uvx`, `du -sh site-packages/*`, `python -X importtime` | deptry: 5 findings, the 3 dev-extra ones false; `python-dotenv` produced a paired DEP001+DEP002; pandas import cost 704 ms; `py_mini_racer` 61 MB outsized `pandas` 47 MB |
+| PHP fixture (Docker) | composer 2, monolog + guzzle + a phpunit dev dependency | `composer install`, `show -t`, `why`, then `--no-dev --optimize-autoloader --classmap-authoritative` | vendor **12 MB → 2.5 MB (-79%)** |
+| Java 21 module (Docker) | `mate-base` from a 41-entry reactor | `dependency:analyze` under Temurin 21 | Compiled, then reported `No dependency problems found` |
+
+**No JDK 21 is installed on this machine**, contrary to expectation: `/usr/libexec/java_home`,
+`/Library/Java`, sdkman/jenv/asdf/mise, IDE bundles and a Spotlight search all came up empty;
+only OpenJDK 17 and 26 are present. JDK 26 cannot compile the project either
+(`maven-compiler-plugin` fails with `TypeTag :: UNKNOWN`), so running Maven in a
+Temurin 21 container is now the documented remedy.
+
+This round also produced the fixture suite: `test/fixtures/` plus
+`scripts/verify-commands.mjs`, which runs the documented commands against those
+fixtures, compares a source snapshot before and after to prove the commands are
+read-only, and reports a missing toolchain as SKIP rather than success.
+
+## What was still not validated
+
+- `knip`, `cargo udeps`, `cargo bloat`, `pip-check-reqs` and `composer-unused`
+  were not run (nightly or extra installs required); they remain documented from
+  their own tool docs.
+- `source-map-explorer` / `webpack-bundle-analyzer` were not executed end to end,
+  because no inspected project shipped sourcemaps.
 - **CDS savings on a real application** were not measured; only the 411-class
   Hello World was. The documentation therefore avoids quoting a percentage.
-- **Java 21 projects** could not be analysed on this machine (JDK 17 only), which
-  is exactly why that prerequisite is now documented.
-- **Lockfile-level accounting** (e.g. pnpm's symlinked `node_modules`) is described
-  from tool behaviour, not from a measurement here.
+- Java analysis ran on a single module inside a container, not across the whole
+  41-module reactor.
 
-## Reproducing the JVM half
+## Reproducing everything
+
+```bash
+npm test                      # unit tests + documentation contracts
+npm run verify                # documented commands vs fixtures, offline toolchains
+npm run verify:network        # adds the Maven fixture case
+```
 
 The CDS and class-loading claims can be re-checked on any machine with a JDK:
 

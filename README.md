@@ -79,7 +79,8 @@ references/replacements.md            heavyweight → lightweight replacement ta
 references/startup-optimization.md    startup: classes, CDS, lazy init, lazy images
 scripts/plan.mjs                      read-only audit planner (no dependencies)
 scripts/install.mjs                   link the skill into every AI tool
-test/                                 node --test suites, no network needed
+scripts/verify-commands.mjs           run the documented commands against test/fixtures
+test/                                 node --test suites and per-ecosystem fixtures
 VALIDATION.md                         what was verified on real projects, and how
 ```
 
@@ -91,8 +92,21 @@ Every command in this skill was run against real projects before release, and th
 - `mvn dependency:tree -DoutputFile` overwrites itself once per module in a reactor: `-DappendOutput=true` turned a 25-line report into 4151 lines.
 - Long reactor output must not be piped into `head`; a duplicate declaration only appeared at module 35 of 41.
 - `dependency:analyze` forks `test-compile` itself, skips `pom`-packaging modules, and reported `spring-boot-starter-webflux` as unused on a library where it is an SPI auto-configuration entry point — the false-positive example the docs now lead with.
+- On a pnpm workspace, `du -sh node_modules/*` reported **0 B** for every symlinked package, so the ranking was pure noise.
+- `depcheck` returned 5 findings on a real project; 4 were referenced only from CSS and `.storybook` config.
+- `deptry` turned one dependency into five issues: a `dev` extra counted as unused, plus a paired finding for a package whose import name differs.
+- `composer install --no-dev --optimize-autoloader --classmap-authoritative` cut vendor from 12 MB to 2.5 MB on the fixture.
+- Java 21 projects can be analysed without touching your machine: Maven in a Temurin 21 container, with `--user` so your `~/.m2` keeps its ownership.
 
-See [VALIDATION.md](VALIDATION.md) for the full evidence table.
+See [VALIDATION.md](VALIDATION.md) for the full evidence table, including what is still unverified.
+
+Run the checks yourself:
+
+```bash
+npm test               # unit tests + documentation contracts
+npm run verify         # documented commands vs fixtures, with a read-only proof
+npm run verify:network # adds the Maven case
+```
 
 ## Contributing
 

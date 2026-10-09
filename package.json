@@ -6,7 +6,9 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "test": "node --test",
+    "test": "node --test test/*.test.js",
+    "verify": "node scripts/verify-commands.mjs",
+    "verify:network": "node scripts/verify-commands.mjs --network",
     "plan": "node scripts/plan.mjs",
     "plan:self": "node scripts/plan.mjs ."
   },

@@ -79,7 +79,8 @@ references/replacements.md            大依赖 → 小依赖替换表
 references/startup-optimization.md    启动优化：类加载、CDS、懒加载、分层镜像
 scripts/plan.mjs                      只读审计计划生成器（零依赖）
 scripts/install.mjs                   安装到各 AI 工具
-test/                                 node --test 测试，无需网络
+scripts/verify-commands.mjs           拿 test/fixtures 实跑文档里的命令
+test/                                 node --test 测试与各生态 fixture
 VALIDATION.md                         在真实项目上验证了什么、怎么验的
 ```
 
@@ -91,8 +92,21 @@ VALIDATION.md                         在真实项目上验证了什么、怎么
 - `mvn dependency:tree -DoutputFile` 在多模块 reactor 里会被逐模块覆盖：加上 `-DappendOutput=true` 后，报告从 25 行变成 4151 行。
 - 长的 reactor 输出不能直接管道给 `head`：某处重复声明直到第 41 个模块中的第 35 个才出现。
 - `dependency:analyze` 自己会 fork `test-compile`、会跳过 pom 聚合模块，并且曾把一个库的 `spring-boot-starter-webflux` 判为"未使用"——而它是 SPI 自动配置入口。这正是文档现在开篇强调的误报样本。
+- pnpm 工作区里 `du -sh node_modules/*` 对每个符号链接包都报 **0B**，照它排序得到的是纯噪声。
+- `depcheck` 在一个真实项目上给出 5 条结论，其中 4 条只被 CSS 与 `.storybook` 配置引用。
+- `deptry` 把一条依赖拆成五个问题：dev extra 被判未使用，导入名与包名不同的那条又产生成对假发现。
+- fixture 上 `composer install --no-dev --optimize-autoloader --classmap-authoritative` 让 vendor 从 12M 降到 2.5M。
+- Java 21 项目无需动你的机器：用 Temurin 21 容器跑 Maven，加 `--user` 就不会污染 `~/.m2` 的属主。
 
-完整证据表见 [VALIDATION.md](VALIDATION.md)。
+完整证据表（含仍未验证的事项）见 [VALIDATION.md](VALIDATION.md)。
+
+自己跑一遍：
+
+```bash
+npm test               # 单元测试 + 文档契约
+npm run verify         # 用 fixture 实跑文档命令，并校验只读
+npm run verify:network # 追加 Maven 用例
+```
 
 ## 贡献
 

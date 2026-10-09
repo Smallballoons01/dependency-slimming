@@ -1,0 +1,8 @@
+{
+  "name": "demo/dep-fixture",
+  "description": "fixture for dependency-slimming validation",
+  "license": "MIT",
+  "require": {
+    "php": ">=8.1"
+  }
+}

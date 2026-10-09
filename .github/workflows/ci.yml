@@ -18,7 +18,9 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
       - name: Unit tests and documentation contracts
-        run: node --test
+        run: npm test
+      - name: Documented commands run against the fixtures
+        run: node scripts/verify-commands.mjs --network
       - name: The planner runs against this repository
         run: node scripts/plan.mjs . --json > /dev/null
       - name: The installer stays a dry run by default
