@@ -103,6 +103,8 @@ test('the Go guidance keeps the read-only and filtering corrections', () => {
   assert.match(text, /pclntab|_type/, 'nm output is dominated by runtime metadata, not removable code')
   assert.match(text, /timeout/, 'macOS ships no timeout(1); the doc must say so')
   assert.match(text, /go tool nm -size -sort size|sort -k2 -nr/, 'symbol-level size attribution must be documented')
+  assert.match(text, /-buildvcs=false/, 'the reproducible VCS stamping failure and its workaround must stay')
+  assert.match(text, /main module does not need/, 'go mod why semantics must be explained, not guessed')
 })
 
 test('the Java guidance keeps the reactor and analyzer corrections', () => {
@@ -111,6 +113,16 @@ test('the Java guidance keeps the reactor and analyzer corrections', () => {
   assert.match(text, /Skipping pom project|packaging/, 'pom-packaging modules produce no analysis')
   assert.match(text, /head|截断|truncat/i, 'long reactor output must not be piped into head blindly')
   assert.match(text, /annotation processor|注解处理器/, 'analyze false positives are the top removal hazard')
+  assert.match(text, /NF==4/, 'unzip -l ranks its own summary line first unless it is filtered')
+  assert.match(text, /dependency:tree -Dverbose/, 'verbose trees still work on plugin 3.9.0 and stay documented')
+  assert.match(text, /duplicate-finder/, 'same-class-in-two-jars detection is the high-value check')
+  assert.match(text, /jdeps/, 'runtime image trimming via jdeps must stay documented')
+})
+
+test('the startup guidance keeps the current Spring Boot layering tooling', () => {
+  const text = read('references/startup-optimization.md')
+  assert.match(text, /jarmode=tools/, 'layertools is deprecated; the current form must be documented')
+  assert.match(text, /shared objects file/, 'CDS effectiveness must be verified, not assumed')
 })
 
 test('apply-phase commands are always separated from read-only detection', () => {

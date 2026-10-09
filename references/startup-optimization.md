@@ -7,7 +7,7 @@
 ### 1. 测量
 
 - 类加载耗时与数量（JDK 9+）：`java -Xlog:class+load:file=classload.log:time,uptime,tags -jar app.jar`（JDK 8 用 `-verbose:class`）
-  - `wc -l classload.log` 看总加载类数；按时间戳分布看加载集中在哪个阶段。实测 JDK 17 上一个 Hello World 就加载 **411 个类**，业务应用通常是它的几十倍。
+  - `wc -l classload.log` 看总加载类数。实测对照：JDK 17 的 Hello World **411 个类**；一个真实 Spring Boot 网关（87M 肥 jar）**14,120 个类**，其中 **1,458 个来自 CDS 归档**（`grep -c 'shared objects file'`）——这就是该指标的合理量级。
   - CDS 生效的类来源显示为 `shared objects file`——`grep -c 'shared objects file' classload.log` 就是命中数，没命中说明 archive 失效（见下）。
 - Spring Boot：Boot 2.4+ 配置 `BufferingApplicationStartup` 后可拉 `/actuator/startup`，拿到 Bean 级时间线；简单场景直接看启动日志分段。
 - 端到端：`hyperfine --warmup 2 'java -jar app.jar'`，或"启动到端口就绪"的脚本计时。
@@ -32,7 +32,7 @@
 
 ### 4. 部署形态（交付体验）
 
-- 肥 jar → 分层镜像：`java -Djarmode=layertools -jar app.jar extract`，依赖层放低层吃缓存——发布从"重传整个 jar"变成"只推代码层"。
+- 肥 jar → 分层镜像：Boot 3.3+ 用 **`java -Djarmode=tools -jar app.jar list-layers`**（实测列出 `dependencies / spring-boot-loader / snapshot-dependencies / application` 四层）；旧写法 `java -Djarmode=layertools -jar app.jar extract` 在 Boot 3.5 上会打印弃用警告，只当兼容用。分层后依赖层吃缓存——发布从"重传整个 jar"变成"只推代码层"。
 - 极致冷启动（serverless/CLI 场景才上）：GraalVM native image（启动几十 ms 级；代价：构建慢 + 反射配置维护）或 CRaC checkpoint/restore（毫秒级恢复；代价：运维复杂度）。按场景选，不要默认上。
 - 运行时镜像：jlink 最小 JRE（`jdeps --print-module-deps` 算模块集）或 distroless。
 

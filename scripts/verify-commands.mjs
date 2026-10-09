@@ -29,7 +29,7 @@ const WITH_NETWORK = FLAGS.has('--network')
 const VERBOSE = FLAGS.has('--verbose')
 
 /** Directories a documented command may legitimately create. */
-const MUTABLE = new Set(['node_modules', 'target', 'vendor', 'dist', 'build', '__pycache__', '.git'])
+const MUTABLE = new Set(['node_modules', 'target', 'vendor', 'dist', 'build', '__pycache__', '.git', '.gradle'])
 
 function have(tool) {
   const probe = spawnSync('bash', ['-lc', `command -v ${tool}`], { encoding: 'utf8' })
@@ -106,6 +106,52 @@ const CASES = [
     ],
   },
   {
+    ecosystem: 'go',
+    fixture: 'go-unused',
+    tools: ['go'],
+    // Positive detection: the fixture declares a module it never imports, wired
+    // through a local `replace` so it resolves without network access.
+    checks: [
+      {
+        name: 'go mod tidy -diff (finds the unused require)',
+        cmd: 'go',
+        args: ['mod', 'tidy', '-diff'],
+        expectStatus: 1,
+        stdoutIncludes: 'require example.com/leftover',
+      },
+      {
+        name: 'go mod why -m <module>',
+        cmd: 'go',
+        args: ['mod', 'why', '-m', 'example.com/leftover'],
+        expectStatus: 0,
+        outputMatches: /main module does not need module/,
+      },
+    ],
+  },
+  {
+    ecosystem: 'gradle',
+    fixture: 'gradle',
+    // Gradle ships on the GitHub runners; elsewhere point GRADLE_BIN at a cached
+    // distribution (e.g. ~/.gradle/wrapper/dists/gradle-8.9-bin/*/gradle-8.9/bin/gradle).
+    tools: [process.env.GRADLE_BIN ?? 'gradle'],
+    bins: { gradle: process.env.GRADLE_BIN ?? 'gradle' },
+    checks: [
+      {
+        name: 'gradle dependencies --configuration runtimeClasspath',
+        cmd: 'gradle',
+        args: ['--offline', '--no-daemon', '--console=plain', 'dependencies', '--configuration', 'runtimeClasspath'],
+        expectStatus: 0,
+        outputMatches: /runtimeClasspath/,
+      },
+      {
+        name: 'gradle dependencyInsight --dependency <name>',
+        cmd: 'gradle',
+        args: ['--offline', '--no-daemon', '--console=plain', 'dependencyInsight', '--dependency', 'does-not-exist', '--configuration', 'runtimeClasspath'],
+        expectStatus: 0,
+      },
+    ],
+  },
+  {
     ecosystem: 'rust',
     fixture: 'rust',
     tools: ['cargo'],
@@ -165,6 +211,32 @@ const CASES = [
         expectStatus: 0,
         expectFile: 'target/classes/demo/App.class',
       },
+      {
+        name: 'mvn dependency:tree -DappendOutput=true',
+        cmd: 'mvn',
+        args: ['-B', '-q', 'dependency:tree', '-DoutputFile=/tmp/dep-verify-tree.txt', '-DappendOutput=true'],
+        expectStatus: 0,
+      },
+      {
+        name: 'mvn dependency:analyze-duplicate',
+        cmd: 'mvn',
+        args: ['-B', 'dependency:analyze-duplicate'],
+        expectStatus: 0,
+        outputMatches: /No duplicate dependencies found|List of duplicate/,
+      },
+      {
+        name: 'mvn dependency:analyze',
+        cmd: 'mvn',
+        args: ['-B', 'dependency:analyze'],
+        expectStatus: 0,
+      },
+      {
+        name: 'mvn package && unzip -l (summary line filtered)',
+        cmd: "mvn -B -q -DskipTests package && unzip -l target/*.jar | awk 'NF==4' | sort -k1 -rn | head -3",
+        shell: true,
+        expectStatus: 0,
+        outputMatches: /demo\/App\.class|META-INF/,
+      },
     ],
   },
 ]
@@ -173,11 +245,12 @@ function substitute(command, logPath) {
   return command.replaceAll('{log}', logPath)
 }
 
-function runCheck(check, cwd, logPath) {
+function runCheck(check, cwd, logPath, caseDef) {
   if (check.shell) {
     return spawnSync(substitute(check.cmd, logPath), { cwd, shell: true, encoding: 'utf8' })
   }
-  return spawnSync(check.cmd, check.args ?? [], { cwd, encoding: 'utf8' })
+  const binary = caseDef.bins?.[check.cmd] ?? check.cmd
+  return spawnSync(binary, check.args ?? [], { cwd, encoding: 'utf8' })
 }
 
 function evaluate(check, result, cwd) {
@@ -229,7 +302,7 @@ for (const caseDef of CASES) {
 
     for (const check of caseDef.checks) {
       const started = Date.now()
-      const result = runCheck(check, workspace, logPath)
+      const result = runCheck(check, workspace, logPath, caseDef)
       const problem = evaluate(check, result, workspace)
       rows.push({
         ecosystem: caseDef.ecosystem,

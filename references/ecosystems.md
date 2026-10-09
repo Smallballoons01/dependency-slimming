@@ -33,8 +33,11 @@ Serverless/冷启动专项见 references/startup-optimization.md。
 
 体积：
 1. 产物：`ls -lh target/*.jar build/libs/*.jar`
-2. 肥 jar 内部构成（Spring Boot 看 BOOT-INF/lib）：`unzip -l target/app.jar | sort -k1 -rn | head -30`
-3. 依赖树：`mvn dependency:tree -Dverbose`（输出大，配合 `grep` 或 `-Dincludes=组:构件` 下钻）；Gradle：`./gradlew dependencies --configuration runtimeClasspath`；冲突下钻 `./gradlew dependencyInsight --dependency <名> --configuration runtimeClasspath`
+2. 肥 jar 内部构成（Spring Boot 看 BOOT-INF/lib）：**必须过滤汇总行**——`unzip -l` 的汇总行（`91928424  356 files`）会被 `sort -k1 -rn` 排到第一名。只保留 4 字段的文件行：
+   `unzip -l target/app.jar | awk 'NF==4' | sort -k1 -rn | head -30`
+   实测一个 87M 的 Boot 网关肥 jar：174 个依赖条目，真实大户 `nacos-client` 14.9M、`byte-buddy` 9.0M、`bcprov-jdk18on` 8.9M、`redisson` 2.9M。
+3. 依赖树：`mvn dependency:tree -Dverbose`（**插件 3.9.0 仍支持**，实测打印 `... omitted for duplicate` 行，正是版本收敛现场）；范围下钻 `mvn dependency:tree -Dincludes=组:构件`（实测 `-Dincludes=io.r2dbc` 只列出该组）；Gradle：`./gradlew dependencies --configuration runtimeClasspath`（实测输出 `runtimeClasspath - Runtime classpath of source set 'main'`）；冲突下钻 `./gradlew dependencyInsight --dependency <名> --configuration runtimeClasspath`（实测无匹配时打印 `No dependencies matching given input were found`，仍 BUILD SUCCESSFUL）。
+4. 运行时镜像裁剪：`jdeps --print-module-deps --ignore-missing-deps target/app.jar`（实测某库输出 `java.base,java.desktop`——注意 `java.desktop` 常被无意拖进来，是 jlink 最小化的首要削减对象）。
 
 未使用（Maven 自带）：
 - `mvn dependency:analyze` 会 **fork `test-compile` 生命周期**（输出里可见 `>>> dependency:analyze > test-compile >>>`），所以它**自己会先编译**，不需要手动加 compile 前置。代价是它继承了整个构建：**项目在你本机 JDK 上编译不过，它就什么也分析不出来**（实测某项目 target 21、本机 JDK 17 → `不支持发行版本 21`，analyze 零输出）。先确认 `java -version` 与项目 target 匹配。
@@ -56,7 +59,7 @@ Serverless/冷启动专项见 references/startup-optimization.md。
 
 重复类/版本冲突：
 - **重复声明**有两个来源，都有效：① 任何 `mvn` 运行头部的模型警告 `'...must be unique: g:a:jar -> duplicate declaration of version (?) @ line N'`（免费，但只给行号）；② `mvn dependency:analyze-duplicate` 的 `List of duplicate dependencies defined in <dependencies/>`（给出清单，逐模块跑）。实测同一处重复（同一 `<dependencies>` 里声明两次 `mate-monitor-starter`）两者都能抓到。
-- `mvn dependency:tree -Dverbose` 看 omitted for conflict；要抓真坑用 basepom 的 duplicate-finder-maven-plugin 找**不同 jar 里的同名类**（类加载顺序决定行为）。
+- 不同 jar 里的**同名类**才是真坑（类加载顺序决定行为）：`mvn -B org.basepom.maven:duplicate-finder-maven-plugin:check`（实测可用，依次检查 compile/runtime/test 三个 classpath；无冲突时 BUILD SUCCESS）。
 - 高发冲突：slf4j 多实现并存（logback+log4j-over-slf4j+slf4j-simple）、javax ↔ jakarta 混用、guava/jackson 多版本。
 
 打包/部署形态：
@@ -70,11 +73,12 @@ Serverless/冷启动专项见 references/startup-optimization.md。
 
 未使用（编译器级准确，无 Java 那类误报——Go 未 import 就编不进来）：
 - `go mod tidy -diff`（**Go 1.23+，只读**）：直接 `go mod tidy` 会改写 go.mod/go.sum，检测阶段绝不能用。实测它除无用模块外还会暴露 **go.sum 残留条目**（某 373 模块服务一次查出 tablewriter / cobra / runewidth / uniseg 残链）——这属于依赖漂移，报告里单列一类。
+  - **它的退出码可直接当门禁用**：有差异时退出码 **1** 并打印 diff（实测 fixture 输出 `-require example.com/leftover v0.0.0`）；干净时退出码 0 且无输出。
 - `go mod tidy` 会保留主模块测试所需的依赖，测试库留在 go.mod 属正常，不要当冗余删。
-- 下钻：`go mod why -m <module>`（打印引用链；输出 "main module does not need" = 可删）。
+- 下钻：`go mod why -m <module>`。实测两种输出——被依赖时打印引用链（`internal/handler` → `github.com/google/uuid`）；不需要时打印 `(main module does not need module X)`。注意它回答的是"是否需要"，对**未声明**的模块也会给出同一句话，别把它当成"已声明且未使用"的证明。
 - 入度榜只是**提示不是结论**：`go mod graph | awk '{print $2}' | grep -v '^go@' | sort | uniq -c | sort -rn | head -15`。实测榜首常是 test-only 助手（go-spew、go-difflib、testify、go-cmp）与 `go@x.y` 伪节点；先滤掉 `go@`，再对候选逐个 `go mod why` 确认。
 - main 包定位：`go list -f '{{.ImportPath}} {{.Name}}' ./... | grep -w main`——别假设仓库根就是 main（实测一个后端项目有 3 个 `cmd/*` main）。
-- ⚠️ 环境坑：`go list` / `go build` 会因 git 调用失败而报 `error obtaining VCS status ... Use -buildvcs=false`。这是环境问题不是项目问题，确认 git 可用，或用 `GOFLAGS=-buildvcs=false` 绕开。
+- ⚠️ **`-buildvcs=false` 已实测复现**：git 环境不完整时 `go build` 直接失败 `error obtaining VCS status: exit status 128`；加 `GOFLAGS=-buildvcs=false` 后构建成功。效果可自证：`go version -m <bin> | grep -c '^ *vcs'`（默认会列出 `vcs.revision`，关掉后为 0）。这是环境问题，不是项目问题。
 
 体积：
 - `go build -o /tmp/app <main-pkg> && ls -lh /tmp/app`
@@ -145,4 +149,4 @@ feature 卫生：重 crate 默认全 feature（tokio "full"、image 全编解码
 - **体积预算进 CI**：JS 用 size-limit；其他生态用脚本比对产物大小/依赖数，超阈值即 fail。防回归比一次瘦身更重要。
 - 依赖更新机器人（renovate/dependabot）+ 定期审计；删依赖同时缩小漏洞与许可证暴露面（可顺带跑 osv-scanner，属相邻能力不强塞进报告）。
 - ⚠️ **macOS/BSD 上没有 `timeout(1)`**（往往也没有 `gtimeout`）：拿它包住审计命令会直接失败或静默无输出——本次验证中连踩三次。需要限时就选一个会立刻退出的入参，或用工具自带的超时参数。
-- **本仓库自带 `node scripts/verify-commands.mjs`**：用 `test/fixtures/` 里的微型项目实跑本文档的命令，并在运行前后比对源码快照以证明只读；工具链缺失会明确 SKIP（不会假装成功）。改完本文档先跑它，加 `--network` 才会执行需要下载的用例。
+- **本仓库自带 `node scripts/verify-commands.mjs`**：用 `test/fixtures/` 里的微型项目实跑本文档的命令，并在运行前后比对源码快照以证明只读；工具链缺失会明确 SKIP（不会假装成功）。覆盖 node / go / go-unused（正向检测）/ gradle / rust / python / php / java-maven，需要下载的用例只在 `--network` 下执行。改完本文档先跑它。
