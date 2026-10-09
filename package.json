@@ -1,0 +1,30 @@
+{
+  "name": "dependency-slimming-skill",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Portable dependency-audit and slimming skill for AI coding tools (Claude Code, Codex, Cursor, Gemini CLI, DeepSeek Harness, and anything else that reads Agent Skills). Finds unused, duplicated and oversized dependencies across Node/Java/Go/Rust/Python/PHP, recommends lighter replacements, and cuts artifact size and startup time.",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test",
+    "plan": "node scripts/plan.mjs",
+    "plan:self": "node scripts/plan.mjs ."
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "agent-skill",
+    "dependency-audit",
+    "dependency-slimming",
+    "bundle-size",
+    "startup-time",
+    "maven",
+    "gradle",
+    "npm",
+    "pnpm",
+    "cargo",
+    "pip",
+    "composer"
+  ]
+}

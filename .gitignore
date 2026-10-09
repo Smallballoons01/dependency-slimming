@@ -1,0 +1,20 @@
+# Dependencies / runtime
+node_modules/
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# Logs and scratch output from audits
+*.log
+tmp/
+out/
+
+# Coverage
+coverage/
+.nyc_output/
